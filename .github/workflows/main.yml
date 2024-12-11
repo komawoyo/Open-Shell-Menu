@@ -1,0 +1,34 @@
+name: Open-Shell
+
+on:
+  workflow_dispatch:
+    branches: [ master ]
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    strategy:
+      matrix:
+        compiler: ["msvc2022"]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: CMake Configure and Build
+        shell: cmd
+        working-directory: ${{github.workspace}}
+        run: "Src/Setup/__MakeFinal.bat"
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: snapshot-${{matrix.compiler}}
+          path: |
+            Src/Setup/Final/*.exe
+          retention-days: 7
