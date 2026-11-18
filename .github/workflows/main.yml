@@ -10,7 +10,8 @@ env:
 jobs:
   build:
     runs-on: windows-latest
-
+    outputs:
+      new_version: ${{ steps.versioning.outputs.NEW_VERSION }}
     strategy:
       matrix:
         compiler: ["msvc2022"]
@@ -21,10 +22,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: CMake Configure and Build
+      - name: Build installers
         shell: cmd
         working-directory: ${{github.workspace}}
-        run: "Src/Setup/_BuildEnglish.bat"
+        env:
+          CS_VERSION: ${{ steps.versioning.outputs.NEW_VERSION }}
+        run: Src\Setup\_BuildEnglish.bat
 
       - uses: actions/upload-artifact@v7
         with:
