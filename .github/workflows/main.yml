@@ -25,7 +25,7 @@ jobs:
         working-directory: ${{github.workspace}}
         env:
           CS_VERSION: "4.4.1000"
-        run: Src\Setup\_BuildEnglish.bat
+        run: Src\Setup\__MakeFinal.bat
 
       - uses: actions/upload-artifact@v7
         with:
