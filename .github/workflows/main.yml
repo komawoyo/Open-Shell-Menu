@@ -26,7 +26,7 @@ jobs:
         working-directory: ${{github.workspace}}
         run: "Src/Setup/__MakeFinal.bat"
 
-      - uses: actions/upload-artifact@v8
+      - uses: actions/upload-artifact@v7
         with:
           name: snapshot-${{matrix.compiler}}
           path: |
