@@ -22,6 +22,7 @@
 #include <dbghelp.h>
 #include <set>
 #include <Thumbcache.h>
+#include <tlhelp32.h>
 
 #define HOOK_DROPTARGET // define this to replace the IDropTarget of the start button
 #define START_TOUCH // touch support for the start button
@@ -67,6 +68,8 @@ static SIZE g_TaskbarTextureSize;
 static TTaskbarTile g_TaskbarTileH, g_TaskbarTileV;
 static RECT g_TaskbarMargins;
 int g_CurrentCSMTaskbar=-1, g_CurrentWSMTaskbar=-1;
+// ExplorerPatcher taskbar
+static bool g_epTaskbar = false;
 
 static void FindWindowsMenu( void );
 static void RecreateStartButton( size_t taskbarId );
@@ -1342,8 +1345,11 @@ static void UpdateStartButtonPosition(const TaskbarInfo* taskBar, const WINDOWPO
 
 		// Start button on Win11 is a bit shifted to the right
 		// We will shift our Aero button to cover original button
-		if (IsWin11() && (x == info.rcMonitor.left) && (GetStartButtonType() == START_BUTTON_AERO))
+		if (IsWin11() && (x == info.rcMonitor.left) && (GetStartButtonType() == START_BUTTON_AERO) && !g_epTaskbar)
 			x += ScaleForDpi(taskBar->taskBar, 6);
+
+		if (GetStartButtonType() == START_BUTTON_CUSTOM)
+			x += ScaleForDpi(taskBar->taskBar, GetSettingInt(L"StartButtonOffset"));
 	}
 
 	RECT rcButton = { x, y, x + taskBar->startButtonSize.cx, y + taskBar->startButtonSize.cy };
@@ -1622,7 +1628,7 @@ static void ComputeTaskbarColors( int *data )
 {
 	bool bDefLook;
 	int look=GetSettingInt(L"TaskbarLook",bDefLook);
-	if (GetWinVersion()<WIN_VER_WIN10 || look==TASKBAR_AEROGLASS || (look==TASKBAR_TRANSPARENT && g_TaskbarTexture))
+	if (GetWinVersion()<WIN_VER_WIN10 || !IsAppThemed() || look==TASKBAR_AEROGLASS || (look==TASKBAR_TRANSPARENT && g_TaskbarTexture))
 	{
 		memset(data,0,16);
 	}
@@ -1646,6 +1652,17 @@ static void ComputeTaskbarColors( int *data )
 		data[2]=(color&0xFFFFFF)|(a<<24);
 	}
 	data[3]=0;
+}
+
+// Exits the menu and starts it again: StartMenu.exe -reload, from this DLL's folder, makes the running menu exit,
+// waits for it, and carries on as the menu
+static void ReloadStartMenu( void )
+{
+	wchar_t exe[_MAX_PATH];
+	GetModuleFileName(g_Instance,exe,_countof(exe));
+	PathRemoveFileSpec(exe);
+	PathAppend(exe,L"StartMenu.exe");
+	ShellExecute(NULL,NULL,exe,L"-reload",NULL,SW_SHOWNORMAL);
 }
 
 static void ShowWinX( void )
@@ -1870,6 +1887,7 @@ static LRESULT CALLBACK SubclassTaskBarProc( HWND hWnd, UINT uMsg, WPARAM wParam
 		ComputeTaskbarColors(data);
 		WINCOMPATTRDATA attrData={0x13,&data,sizeof(data)};
 		SetWindowCompositionAttribute(hWnd,&attrData);
+		UpdateTaskBars(TASKBAR_UPDATE_TEXTURE);
 		return res;
 	}
 	if ((uMsg==WM_DWMCOLORIZATIONCOLORCHANGED || uMsg==WM_SETTINGCHANGE) && taskBar && taskBar->bCustomLook && SetWindowCompositionAttribute && GetWinVersion()<WIN_VER_WIN10)
@@ -1930,7 +1948,7 @@ static LRESULT CALLBACK SubclassTaskBarProc( HWND hWnd, UINT uMsg, WPARAM wParam
 				WINCOMPATTRDATA attrData={0x13,&data,sizeof(data)};
 				SetWindowCompositionAttribute(hWnd,&attrData);
 			}
-			if (g_TaskbarTexture && IsAppThemed())
+			if (g_TaskbarTexture)
 			{
 				// draw taskbar background (behind start button and separators)
 				PAINTSTRUCT ps;
@@ -2381,12 +2399,19 @@ void UpdateTaskBars( TUpdateTaskbar update )
 					}
 				}
 			}
-			else if (GetWinVersion()<WIN_VER_WIN10 && (!bDefColor || !bDefOpacity))
+			else if ((GetWinVersion()<WIN_VER_WIN10 && (!bDefColor || !bDefOpacity)) || !IsAppThemed())
 			{
 				if (bDefColor && GetWinVersion()>WIN_VER_WIN7)
 				{
-					color=GetSystemGlassColor8();
-					color=((color&0xFF)<<16)|(color&0xFF00)|((color>>16)&0xFF);
+					if (IsAppThemed()) 
+					{
+						color=GetSystemGlassColor8();
+						color=((color&0xFF)<<16)|(color&0xFF00)|((color>>16)&0xFF);
+					}
+					else
+					{
+						color=GetSysColor(COLOR_BTNFACE);
+					}
 				}
 				BITMAPINFO bi={0};
 				bi.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);
@@ -2772,6 +2797,17 @@ static void WINAPI SHFillRectClr2( HDC hdc, const RECT *pRect, COLORREF color )
 		g_SHFillRectClr(hdc,pRect,color);
 }
 
+static IatHookData* g_ExtTextOutWHook = nullptr;
+
+// used by ExplorerPatcher's custom implementation of `SHFillRectClr`
+static BOOL WINAPI ExtTextOutW2(HDC hdc, int X, int Y, UINT fuOptions, const RECT* lprc, LPCWSTR lpString, UINT cbCount, const INT* lpDx)
+{
+	if (fuOptions != ETO_OPAQUE || lpString || cbCount || lpDx || !g_CurrentTaskList || !g_TaskbarTexture || GetCurrentThreadId() != g_TaskbarThreadId)
+		return ExtTextOutW(hdc, X, Y, fuOptions, lprc, lpString, cbCount, lpDx);
+
+	return FALSE;
+}
+
 static HRESULT STDAPICALLTYPE DrawThemeBackground2( HTHEME hTheme, HDC hdc, int iPartId, int iStateId, LPCRECT pRect, LPCRECT pClipRect )
 {
 	if (g_CurrentTaskList && g_TaskbarTexture && iPartId==1 && iStateId==0 && GetCurrentThreadId()==g_TaskbarThreadId)
@@ -2915,6 +2951,35 @@ static void OpenCortana( void )
 		ShellExecute(NULL,NULL,L"shell:::{2559a1f8-21d7-11d4-bdaf-00c04f60b9f0}",NULL,NULL,SW_SHOWNORMAL);
 }
 
+HMODULE GetModuleHandleByPrefix(const WCHAR* prefix)
+{
+	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, GetCurrentProcessId());
+	if (snapshot == INVALID_HANDLE_VALUE)
+		return nullptr;
+
+	size_t prefixLength = wcslen(prefix);
+
+	MODULEENTRY32 me{};
+	me.dwSize = sizeof(me);
+
+	HMODULE result = nullptr;
+
+	if (Module32First(snapshot, &me))
+	{
+		do
+		{
+			if (_wcsnicmp(me.szModule, prefix, prefixLength) == 0)
+			{
+				result = reinterpret_cast<HMODULE>(me.modBaseAddr);
+				break;
+			}
+		} while (Module32Next(snapshot, &me));
+	}
+
+	CloseHandle(snapshot);
+	return result;
+}
+
 static void InitStartMenuDLL( void )
 {
 	static bool initCalled = false;
@@ -2957,6 +3022,12 @@ static void InitStartMenuDLL( void )
 	{
 		auto module=GetModuleHandle(L"taskbar.dll");
 		if (!module)
+		{
+			module = GetModuleHandleByPrefix(L"ep_taskbar");
+			if (module)
+				g_epTaskbar = true;
+		}
+		if (!module)
 			module=GetModuleHandle(NULL);
 
 		if (GetWinVersion()>=WIN_VER_WIN10)
@@ -2975,6 +3046,10 @@ static void InitStartMenuDLL( void )
 			g_StretchDIBitsHook=SetIatHook(module,"gdi32.dll","StretchDIBits",StretchDIBits2);
 			if (!g_StretchDIBitsHook)
 				g_StretchDIBitsHook=SetIatHook(module,"ext-ms-win-gdi-draw-l1-1-0.dll","StretchDIBits",StretchDIBits2);
+
+			// ExplorerPatcher compatibility
+			if (g_epTaskbar)
+				g_ExtTextOutWHook = SetIatHook(module, "gdi32.dll", "ExtTextOutW", ExtTextOutW2);
 		}
 
 		{
@@ -2986,7 +3061,10 @@ static void InitStartMenuDLL( void )
 		if (GetWinVersion()<=WIN_VER_WIN81)
 			g_DrawThemeBackgroundHook=SetIatHook(module,"uxtheme.dll","DrawThemeBackground",DrawThemeBackground2);
 		g_DrawThemeTextHook=SetIatHook(module,"uxtheme.dll","DrawThemeText",DrawThemeText2);
-		g_DrawThemeTextExHook=SetIatHook(module,"uxtheme.dll","DrawThemeTextEx",DrawThemeTextEx2);
+		if (IsAppThemed())
+		{
+			g_DrawThemeTextExHook=SetIatHook(module,"uxtheme.dll","DrawThemeTextEx",DrawThemeTextEx2);
+		}
 		g_DrawThemeTextCtlHook=SetIatHook(GetModuleHandle(L"comctl32.dll"),"uxtheme.dll","DrawThemeText",DrawThemeText2);
 		if (GetWinVersion()>=WIN_VER_WIN10)
 			g_SetWindowCompositionAttributeHook=SetIatHook(module,"user32.dll","SetWindowCompositionAttribute",SetWindowCompositionAttribute2);
@@ -3204,6 +3282,7 @@ static void RecreateStartButton( size_t taskbarId )
 			{
 				RECT rc;
 				GetWindowRect(btn,&rc);
+				MapWindowPoints(NULL,taskBar.taskBar,(POINT*)&rc,2); // convert to taskbar coordinates
 				SetWindowPos(btn,HWND_TOP,rc.left,rc.top,0,0,SWP_NOSIZE|SWP_NOACTIVATE|SWP_NOZORDER);
 			}
 		}
@@ -3230,6 +3309,8 @@ static void CleanStartMenuDLL( void )
 	g_SHFillRectClrHook=NULL;
 	ClearIatHook(g_StretchDIBitsHook);
 	g_StretchDIBitsHook=NULL;
+	ClearIatHook(g_ExtTextOutWHook);
+	g_ExtTextOutWHook = NULL;
 
 	ClearIatHook(g_DrawThemeBackgroundHook);
 	g_DrawThemeBackgroundHook=NULL;
@@ -3244,14 +3325,17 @@ static void CleanStartMenuDLL( void )
 	ClearIatHook(g_ShellRegisterHotKeyHook);
 	g_ShellRegisterHotKeyHook=NULL;
 
-	CloseManagers(false);
-	ClearIatHooks();
-
-	// cleanup
+	// close the menu and the settings before the managers. an open menu calls g_SearchManager.CloseMenu() when it is destroyed,
+	// and after CloseManagers that would use the search manager's deleted lock and crash Explorer (exiting with the menu open)
 	if (g_Owner.m_hWnd) g_Owner.DestroyWindow();
 	CloseSettings();
 	CMenuContainer::CloseStartMenu();
 	CMenuFader::ClearAll();
+
+	CloseManagers(false);
+	ClearIatHooks();
+
+	// cleanup
 	UnhookDropTarget();
 	EnableHotkeys(HOTKEYS_CLEAR);
 	HWND hwnd=FindWindow(L"OpenShellMenu.CStartHookWindow",L"StartHookWindow");
@@ -4049,6 +4133,8 @@ if (!g_bTrimHooks)
 						CMD_OPEN_ALL,
 						CMD_EXPLORER,
 						CMD_OPEN_PINNED,
+						CMD_RELOAD,
+						CMD_WINX,
 					};
 
 					// right-click on the start button - open the context menu (Settings, Help, Exit)
@@ -4066,7 +4152,8 @@ if (!g_bTrimHooks)
 						AppendMenu(menu,MF_SEPARATOR,0,0);
 					}
 					int count0=GetMenuItemCount(menu);
-					if (GetSettingBool(L"EnableExplorer"))
+					bool bExplorer=GetSettingBool(L"EnableExplorer");
+					if (bExplorer)
 					{
 						if (!GetSettingString(L"ExplorerPath").IsEmpty())
 							AppendMenu(menu,MF_STRING,CMD_EXPLORER,FindTranslation(L"Menu.Explorer",L"Windows Explorer"));
@@ -4075,17 +4162,27 @@ if (!g_bTrimHooks)
 							AppendMenu(menu,MF_STRING,CMD_OPEN_ALL,FindTranslation(L"Menu.OpenAll",L"O&pen All Users"));
 						if (GetSettingInt(L"PinnedPrograms")==PINNED_PROGRAMS_PINNED)
 							AppendMenu(menu,MF_STRING,CMD_OPEN_PINNED,FindTranslation(L"Menu.OpenPinned",L"O&pen Pinned"));
-						AppendMenu(menu,MF_SEPARATOR,0,0);
 					}
+					// the Win+X menu of Windows, which Shift+right-click opens, for those who don't know the shortcut.
+					// it doesn't open folders, so EnableExplorer doesn't remove it
+					if (winVer>=WIN_VER_WIN8)
+						AppendMenu(menu,MF_STRING,CMD_WINX,FindTranslation(L"Menu.WinXMenu",L"Win+X Menu"));
+					if (bExplorer || winVer>=WIN_VER_WIN8)
+						AppendMenu(menu,MF_SEPARATOR,0,0);
 					if (GetSettingBool(L"EnableSettings"))
 						AppendMenu(menu,MF_STRING,CMD_SETTINGS,FindTranslation(L"Menu.MenuSettings",L"Settings"));
 					if (HasHelp())
 						AppendMenu(menu,MF_STRING,CMD_HELP,FindTranslation(L"Menu.MenuHelp",L"Help"));
 					if (GetSettingBool(L"EnableExit"))
 					{
+						// Reload exits and starts the menu again, so it goes with Exit
+						AppendMenu(menu,MF_STRING,CMD_RELOAD,FindTranslation(L"Menu.MenuReload",L"Reload"));
 						AppendMenu(menu,MF_STRING,CMD_EXIT,FindTranslation(L"Menu.MenuExit",L"Exit"));
 						if (!CMenuContainer::CanShowMenu())
+						{
+							EnableMenuItem(menu,CMD_RELOAD,MF_BYCOMMAND|MF_DISABLED);
 							EnableMenuItem(menu,CMD_EXIT,MF_BYCOMMAND|MF_DISABLED);
+						}
 					}
 					if (GetMenuItemCount(menu)>count0)
 					{
@@ -4100,6 +4197,10 @@ if (!g_bTrimHooks)
 						int res=TrackPopupMenu(menu,TPM_RIGHTBUTTON|TPM_RETURNCMD|(IsLanguageRTL()?TPM_LAYOUTRTL:0),pt0.x,pt0.y,0,msg->hwnd,NULL);
 						DestroyMenu(menu);
 						g_bInMenu=false;
+						if (res==CMD_WINX)
+						{
+							ShowWinX(); // as Shift+right-click does
+						}
 						if (res==CMD_SETTINGS)
 						{
 							EditSettings(false,0);
@@ -4107,6 +4208,11 @@ if (!g_bTrimHooks)
 						if (res==CMD_HELP)
 						{
 							ShowHelp();
+							return TRUE;
+						}
+						if (res==CMD_RELOAD)
+						{
+							ReloadStartMenu();
 							return TRUE;
 						}
 						if (res==CMD_EXIT)
@@ -4159,6 +4265,17 @@ if (!g_bTrimHooks)
 				}
 				else if (bShowWinX)
 				{
+					// Win+X is shown asynchronously on Windows 11. Cancel any pending
+					// hover-open timer first, otherwise it can open the configured
+					// hover menu a moment later and dismiss Win+X again.
+					if (taskBar->bTimer)
+					{
+						taskBar->bTimer=false;
+						if (taskBar->startButton)
+							KillTimer(taskBar->startButton,'CLSM');
+						if (taskBar->oldButton && taskBar->oldButton!=taskBar->startButton)
+							KillTimer(taskBar->oldButton,'CLSM');
+					}
 					ShowWinX();
 				}
 				else if (bShowWin7)

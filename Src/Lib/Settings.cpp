@@ -1110,6 +1110,7 @@ class CSettingsDlg: public CResizeableDlg<CSettingsDlg>
 public:
 	CSettingsDlg( void );
 	void Init( CSetting *pSettings, ICustomSettings *pCustom, int tab, const wchar_t* appId );
+	bool NavigateTab( bool bPrevious );
 
 	BEGIN_MSG_MAP( CSettingsDlg )
 		MESSAGE_HANDLER( WM_INITDIALOG, OnInitDialog )
@@ -1186,7 +1187,7 @@ private:
 	const wchar_t* m_AppId;
 
 	void AddTabs( int name, const CSetting *pSelect=NULL );
-	void SetCurTab( int index, bool bReset, const CSetting *pSelect=NULL );
+	void SetCurTab( int index, bool bReset, const CSetting *pSelect=NULL, bool bFocusPanel=true );
 	bool IsTabValid( void );
 	void StorePlacement( void );
 
@@ -1312,6 +1313,7 @@ LRESULT CSettingsDlg::OnInitDialog( UINT uMsg, WPARAM wParam, LPARAM lParam, BOO
 	icon=(HICON)LoadImage(GetModuleHandle(L"shell32.dll"),MAKEINTRESOURCE(323),IMAGE_ICON,GetSystemMetrics(SM_CXSMICON),GetSystemMetrics(SM_CYSMICON),LR_DEFAULTCOLOR);
 	SendDlgItemMessage(IDC_ICONSEARCH,STM_SETICON,(WPARAM)icon);
 	SendDlgItemMessage(IDC_EDITSEARCH,EM_SETCUEBANNER,FALSE,(LPARAM)(const wchar_t*)LoadStringEx(IDS_SEARCH_PROMPT));
+	SetControlAccessibleName(GetDlgItem(IDC_EDITSEARCH),LoadStringEx(IDS_SEARCH_PROMPT));
 	SetWindowSubclass(GetDlgItem(IDC_EDITSEARCH),SubclassSearchBoxProc,'CLSH',0);
 
 	CWindow tooltip;
@@ -1364,6 +1366,7 @@ LRESULT CSettingsDlg::OnInitDialog( UINT uMsg, WPARAM wParam, LPARAM lParam, BOO
 
 	SIZE maxSize={0,0};
 	m_Tabs=GetDlgItem(IDC_TABSETTINGS);
+	m_Tabs.SetWindowText(LoadStringEx(IDS_SETTINGS_PAGES));
 	m_Panel=NULL;
 	int idx=0;
 	for (const CSetting *pSetting=m_pSettings;pSetting->name;pSetting++)
@@ -1418,7 +1421,8 @@ LRESULT CSettingsDlg::OnInitDialog( UINT uMsg, WPARAM wParam, LPARAM lParam, BOO
 			ShowWindow(SW_MAXIMIZE);
 	}
 
-	return TRUE;
+	GetDlgItem(IDC_BUTTONBACKUP).SetFocus();
+	return FALSE;
 }
 
 LRESULT CSettingsDlg::OnDestroy( UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL& bHandled )
@@ -1477,6 +1481,14 @@ void CSettingsDlg::AddTabs( int name, const CSetting *pSelect )
 		if (pSetting->nameID==name)
 			idx=i;
 	}
+	int tabCount=TabCtrl_GetItemCount(m_Tabs);
+	LONG_PTR tabStyle=m_Tabs.GetWindowLongPtr(GWL_STYLE);
+	if (tabCount<=1)
+		tabStyle=(tabStyle&~WS_TABSTOP)|TCS_FOCUSNEVER;
+	else
+		tabStyle=(tabStyle|WS_TABSTOP)&~TCS_FOCUSNEVER;
+	m_Tabs.SetWindowLongPtr(GWL_STYLE,tabStyle);
+	m_Tabs.SetWindowPos(NULL,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_FRAMECHANGED);
 	m_Index=-1;
 	TabCtrl_SetCurSel(m_Tabs,idx);
 	m_Tabs.InvalidateRect(NULL);
@@ -1499,20 +1511,23 @@ LRESULT CSettingsDlg::OnKeyDown( UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL& 
 	if (wParam==VK_TAB && GetKeyState(VK_CONTROL)<0)
 	{
 		int sel=TabCtrl_GetCurSel(m_Tabs);
+		int count=TabCtrl_GetItemCount(m_Tabs);
 		if (GetKeyState(VK_SHIFT)<0)
 		{
-			if (sel>0)
+			if (count>0)
 			{
-				TabCtrl_SetCurSel(m_Tabs,sel-1);
-				SetCurTab(sel-1,false);
+				int next=(sel+count-1)%count;
+				TabCtrl_SetCurSel(m_Tabs,next);
+				SetCurTab(next,false);
 			}
 		}
 		else
 		{
-			if (sel<TabCtrl_GetItemCount(m_Tabs)-1)
+			if (count>0)
 			{
-				TabCtrl_SetCurSel(m_Tabs,sel+1);
-				SetCurTab(sel+1,false);
+				int next=(sel+1)%count;
+				TabCtrl_SetCurSel(m_Tabs,next);
+				SetCurTab(next,false);
 			}
 		}
 	}
@@ -1670,7 +1685,7 @@ LRESULT CSettingsDlg::OnBackup( WORD wNotifyCode, WORD wID, HWND hWndCtl, BOOL& 
 		ofn.lpstrTitle=title;
 		ofn.lpstrDefExt=L".xml";
 		ofn.Flags=OFN_DONTADDTORECENT|OFN_ENABLESIZING|OFN_EXPLORER|OFN_PATHMUSTEXIST|OFN_OVERWRITEPROMPT|OFN_HIDEREADONLY|OFN_NOCHANGEDIR;
-		if (GetSaveFileName(&ofn))
+		if (GetSaveFileNameSafe(&ofn))
 		{
 			CString err=g_SettingsManager.SaveSettingsXml(path);
 			if (!err.IsEmpty())
@@ -1699,7 +1714,7 @@ LRESULT CSettingsDlg::OnBackup( WORD wNotifyCode, WORD wID, HWND hWndCtl, BOOL& 
 		CString title=LoadStringEx(IDS_XML_TITLE_LOAD);
 		ofn.lpstrTitle=title;
 		ofn.Flags=OFN_DONTADDTORECENT|OFN_ENABLESIZING|OFN_EXPLORER|OFN_FILEMUSTEXIST|OFN_HIDEREADONLY|OFN_NOCHANGEDIR;
-		if (GetOpenFileName(&ofn))
+		if (GetOpenFileNameSafe(&ofn))
 		{
 			SetCurTab(m_Index,true); // reload tab once to force-close any active edit boxes
 			CString error=g_SettingsManager.LoadSettingsXml(path);
@@ -1740,6 +1755,7 @@ LRESULT CSettingsDlg::OnCheckAll( WORD wNotifyCode, WORD wID, HWND hWndCtl, BOOL
 	{
 		m_bBasic=bBasic;
 		AddTabs(-1);
+		::SetFocus(hWndCtl);
 	}
 	return 0;
 }
@@ -1758,7 +1774,7 @@ LRESULT CSettingsDlg::OnSearchChange( WORD wNotifyCode, WORD wID, HWND hWndCtl, 
 	return 0;
 }
 
-void CSettingsDlg::SetCurTab( int index, bool bReset, const CSetting *pSelect )
+void CSettingsDlg::SetCurTab( int index, bool bReset, const CSetting *pSelect, bool bFocusPanel )
 {
 	if (m_Index==index && !bReset) return;
 	m_Index=index;
@@ -1778,12 +1794,59 @@ void CSettingsDlg::SetCurTab( int index, bool bReset, const CSetting *pSelect )
 	::MapWindowPoints(NULL,m_hWnd,(POINT*)&rc,2);
 	TabCtrl_AdjustRect(m_Tabs,FALSE,&rc);
 	HWND hwnd=pPanel->Activate(pGroup,rc,bReset);
+	CString pageTitle=LoadStringEx(pGroup->nameID);
+	::SetWindowText(hwnd,pageTitle);
 	if (hwnd!=m_Panel)
 	{
 		if (m_Panel) ::ShowWindow(m_Panel,SW_HIDE);
 		m_Panel=hwnd;
-		::SetFocus(m_Panel);
 	}
+	if (bFocusPanel) ::SetFocus(m_Panel);
+}
+
+bool CSettingsDlg::NavigateTab( bool bPrevious )
+{
+	HWND focus=::GetFocus();
+	HWND firstPanel=m_Panel?::GetNextDlgTabItem(m_Panel,NULL,FALSE):NULL;
+	HWND lastPanel=m_Panel?::GetNextDlgTabItem(m_Panel,NULL,TRUE):NULL;
+	HWND targets[]={
+		GetDlgItem(IDC_BUTTONBACKUP),
+		GetDlgItem(IDC_CHECKALL),
+		GetDlgItem(IDC_EDITSEARCH),
+		GetDlgItem(IDC_TABSETTINGS),
+		firstPanel,
+		GetDlgItem(IDOK),
+		GetDlgItem(IDCANCEL),
+		GetDlgItem(IDC_LINKHELP),
+		GetDlgItem(IDC_LINKWEB),
+	};
+
+	int current=-1;
+	if (m_Panel && (focus==m_Panel || ::IsChild(m_Panel,focus)))
+	{
+		HWND next=::GetNextDlgTabItem(m_Panel,focus,bPrevious);
+		HWND wrapped=bPrevious?lastPanel:firstPanel;
+		if (next && next!=wrapped)
+			return false; // Let IsDialogMessage move within the active page.
+		current=4;
+	}
+	else
+	{
+		for (int i=0;i<_countof(targets);i++)
+			if (focus==targets[i]) { current=i; break; }
+	}
+	if (current<0) return false;
+
+	for (int step=1;step<=_countof(targets);step++)
+	{
+		int index=(current+(bPrevious?-step:step)+_countof(targets)*2)%_countof(targets);
+		HWND target=(index==4 && bPrevious)?lastPanel:targets[index];
+		if (!target || !::IsWindowVisible(target) || !::IsWindowEnabled(target)) continue;
+		if (index==3 && !(::GetWindowLongPtr(target,GWL_STYLE)&WS_TABSTOP)) continue;
+		::SetFocus(target);
+		return true;
+	}
+	return false;
 }
 
 LRESULT CSettingsDlg::OnSelChanging( int idCtrl, LPNMHDR pnmh, BOOL& bHandled )
@@ -1793,7 +1856,9 @@ LRESULT CSettingsDlg::OnSelChanging( int idCtrl, LPNMHDR pnmh, BOOL& bHandled )
 
 LRESULT CSettingsDlg::OnSelChange( int idCtrl, LPNMHDR pnmh, BOOL& bHandled )
 {
-	SetCurTab(TabCtrl_GetCurSel(m_Tabs),false);
+	// Mouse clicks and Left/Right navigation keep focus on the tab strip.
+	// Ctrl+Tab is handled separately and moves focus into the new page.
+	SetCurTab(TabCtrl_GetCurSel(m_Tabs),false,NULL,false);
 	return 0;
 }
 
@@ -1925,6 +1990,11 @@ bool IsSettingsMessage( MSG *msg )
 	{
 		g_SettingsDlg.SendMessage(WM_KEYDOWN,VK_TAB,msg->lParam);
 		return true;
+	}
+	if (msg->message==WM_KEYDOWN && msg->wParam==VK_TAB)
+	{
+		if (g_SettingsDlg.NavigateTab(GetKeyState(VK_SHIFT)<0))
+			return true;
 	}
 	if (msg->message==WM_KEYDOWN && msg->wParam==VK_RETURN && GetKeyState(VK_CONTROL)<0)
 	{

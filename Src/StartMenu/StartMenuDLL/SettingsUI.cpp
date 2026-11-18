@@ -207,6 +207,10 @@ LRESULT CSkinSettingsDlg::OnInitDialog( UINT uMsg, WPARAM wParam, LPARAM lParam,
 	EnableThemeDialogTexture(m_hWnd,ETDT_ENABLETAB);
 
 	m_Tree=GetDlgItem(IDC_SKINOPTIONS);
+	EnableSettingsTreeAccessibility(m_Tree);
+	CString optionsName;
+	GetDlgItemText(IDC_STATICOPT,optionsName);
+	SetSettingsTreeAccessibleName(m_Tree,optionsName);
 	SetWindowSubclass(m_Tree,SubclassTreeProc,'CLSH',0);
 	TreeView_SetImageList(m_Tree,GetSettingsImageList(m_Tree),TVSIL_NORMAL);
 	m_Tree.SendMessage(TVM_SETEXTENDEDSTYLE,TVS_EX_DOUBLEBUFFER,TVS_EX_DOUBLEBUFFER);
@@ -281,6 +285,7 @@ LRESULT CSkinSettingsDlg::OnInitDialog( UINT uMsg, WPARAM wParam, LPARAM lParam,
 
 LRESULT CSkinSettingsDlg::OnDestroy( UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL& bHandled )
 {
+	ClearSettingsTreeAccessibility(m_Tree);
 	m_EditMode=SKIN_OPTION_NONE;
 	bHandled=FALSE;
 	return 0;
@@ -290,6 +295,7 @@ LRESULT CSkinSettingsDlg::OnDestroy( UINT uMsg, WPARAM wParam, LPARAM lParam, BO
 void CSkinSettingsDlg::InitSkinUI( void )
 {
 	m_Tree.SetRedraw(FALSE);
+	ClearSettingsTreeItemAccessibility(m_Tree);
 	TreeView_DeleteAllItems(m_Tree);
 	m_VariationIndex=-1;
 	m_EditItemIndex=-1;
@@ -396,10 +402,12 @@ void CSkinSettingsDlg::UpdateSkinSettings( void )
 			{
 				item.iImage=item.iSelectedImage=image;
 				TreeView_SetItem(m_Tree,&item);
+				NotifyWinEvent(EVENT_OBJECT_STATECHANGE,m_Tree,OBJID_CLIENT,TreeView_MapHTREEITEMToAccID(m_Tree,hVar));
 				RECT rc;
 				TreeView_GetItemRect(m_Tree,hVar,&rc,FALSE);
 				m_Tree.InvalidateRect(&rc);
 			}
+			SetSettingsTreeItemAccessibleRole(m_Tree,hVar,ROLE_SYSTEM_RADIOBUTTON);
 		}
 		hItem=TreeView_GetNextSibling(m_Tree,hItem);
 	}
@@ -442,6 +450,8 @@ void CSkinSettingsDlg::UpdateSkinSettings( void )
 			item.iImage=item.iSelectedImage=image;
 			item.mask|=TVIF_TEXT;
 			TreeView_SetItem(m_Tree,&item);
+			NotifyWinEvent(EVENT_OBJECT_STATECHANGE,m_Tree,OBJID_CLIENT,TreeView_MapHTREEITEMToAccID(m_Tree,hItem));
+			SetSettingsTreeItemAccessibleRole(m_Tree,hItem,option.groupId>=0?ROLE_SYSTEM_RADIOBUTTON:ROLE_SYSTEM_CHECKBUTTON);
 			item.mask&=~TVIF_TEXT;
 			RECT rc;
 			TreeView_GetItemRect(m_Tree,hItem,&rc,FALSE);
@@ -4456,6 +4466,7 @@ CSetting g_Settings[]={
 		{L"CustomButton",CSetting::TYPE_RADIO,IDS_CUSTOM_BUTTON,IDS_CUSTOM_BUTTON_TIP},
 	{L"StartButtonPath",CSetting::TYPE_BITMAP,IDS_BUTTON_IMAGE,IDS_BUTTON_IMAGE_TIP,L"",0,L"#StartButtonType=2",L"CustomButton"},
 	{L"StartButtonSize",CSetting::TYPE_INT,IDS_BUTTON_SIZE,IDS_BUTTON_SIZE_TIP2,0,0,L"#StartButtonType=2",L"CustomButton"},
+	{L"StartButtonOffset",CSetting::TYPE_INT,IDS_BUTTON_OFFSET,IDS_BUTTON_OFFSET_TIP,0,0,L"#StartButtonType=2",L"CustomButton"},
 	{L"StartButtonAlign",CSetting::TYPE_BOOL,IDS_BUTTON_ALIGN,IDS_BUTTON_ALIGN_TIP,0,0,L"#StartButtonType=2",L"CustomButton"},
 	{L"StartButtonIcon",CSetting::TYPE_ICON,IDS_BUTTON_ICON,IDS_BUTTON_ICON_TIP,L",1",0,L"#StartButtonType=1",L"ClasicButton"},
 	{L"StartButtonIconSize",CSetting::TYPE_INT,IDS_BUTTON_ICON_SIZE,IDS_BUTTON_ICON_SIZE_TIP,0,0,L"#StartButtonType=1",L"ClasicButton"},
@@ -5157,12 +5168,13 @@ void InitSettings( void )
 	InitSettings(g_Settings,COMPONENT_MENU,&g_CustomSettings);
 }
 
-static int g_ButtonPath, g_ButtonSize, g_ButtonIcon, g_ButtonIconSize, g_ButtonText, g_ButtonTip;
+static int g_ButtonPath, g_ButtonSize, g_ButtonIcon, g_ButtonOffset, g_ButtonIconSize, g_ButtonText, g_ButtonTip, g_ButtonAllTaskbars;
 static bool g_bButtonEnable, g_bTaskbarsChanged, g_bTaskbarsUpdated;
 
 static void StoreButtonSettings( void )
 {
 	g_bButtonEnable=GetSettingBool(L"EnableStartButton");
+	g_ButtonAllTaskbars=GetSettingBool(L"AllTaskbars");
 	g_ButtonTip=CalcFNVHash(GetSettingString(L"StartButtonTip"));
 	g_ButtonPath=GetSettingInt(L"StartButtonType");
 	g_ButtonIcon=0;
@@ -5175,11 +5187,13 @@ static void StoreButtonSettings( void )
 	if (g_ButtonPath==START_BUTTON_CUSTOM)
 		g_ButtonPath=CalcFNVHash(GetSettingString(L"StartButtonPath"));
 	g_ButtonSize=GetSettingInt(L"StartButtonSize");
+	g_ButtonOffset=GetSettingInt(L"StartButtonOffset");
 	g_ButtonIconSize=GetSettingInt(L"StartButtonIconSize");
 }
 
 static void UpdateButtons( bool bForce )
 {
+	int allTaskbars=GetSettingBool(L"AllTaskbars");
 	int tip=CalcFNVHash(GetSettingString(L"StartButtonTip"));
 	int path=GetSettingInt(L"StartButtonType");
 	int icon=0;
@@ -5191,8 +5205,8 @@ static void UpdateButtons( bool bForce )
 	}
 	if (path==START_BUTTON_CUSTOM)
 		path=CalcFNVHash(GetSettingString(L"StartButtonPath"));
-	bool bRecreate=(g_bButtonEnable!=GetSettingBool(L"EnableStartButton") || path!=g_ButtonPath || g_ButtonSize!=GetSettingInt(L"StartButtonSize")
-		|| g_ButtonIcon!=icon || g_ButtonIconSize!=GetSettingInt(L"StartButtonIconSize") || g_ButtonText!=text || g_ButtonTip!=tip);
+	bool bRecreate=(g_bButtonEnable!=GetSettingBool(L"EnableStartButton") || path!=g_ButtonPath || g_ButtonSize!=GetSettingInt(L"StartButtonSize") || g_ButtonOffset!=GetSettingInt(L"StartButtonOffset")
+		|| g_ButtonIcon!=icon || g_ButtonIconSize!=GetSettingInt(L"StartButtonIconSize") || g_ButtonText!=text || g_ButtonTip!=tip || g_ButtonAllTaskbars!=allTaskbars);
 	if ((g_bTaskbarsChanged && !g_bTaskbarsUpdated) || bForce || bRecreate)
 	{
 		UpdateTaskBars(bRecreate?TASKBAR_RECREATE_BUTTONS:TASKBAR_UPDATE);

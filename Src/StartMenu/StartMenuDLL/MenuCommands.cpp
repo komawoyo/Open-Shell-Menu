@@ -24,6 +24,52 @@
 #include <propvarutil.h>
 #include <algorithm>
 #include <propkey.h>
+#include <thread>
+
+// Execute function on a separate STA thread while pumping messages on caller thread.
+template <typename TFunc>
+static auto ExecuteOnSTAThread(TFunc&& func) -> decltype(func())
+{
+	using ReturnType = decltype(func());
+	ReturnType result{};
+
+	std::thread worker([&func, &result]() mutable {
+		CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+		result = func();
+		CoUninitialize();
+	});
+
+	// Pump messages while waiting for the worker (dialog) to finish
+	while (true)
+	{
+		HANDLE hWorker = worker.native_handle();
+		if (MsgWaitForMultipleObjects(1, &hWorker, FALSE, INFINITE, QS_ALLINPUT) == WAIT_OBJECT_0)
+			break;
+
+		MSG msg;
+		while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+		{
+			if (msg.message == WM_QUIT)
+			{
+				PostQuitMessage((int)msg.wParam);
+				break;
+			}
+			TranslateMessage(&msg);
+			DispatchMessage(&msg);
+		}
+	}
+	worker.join();
+
+	return result;
+}
+
+// Wrapper for SHOpenFolderAndSelectItems that runs on separate STA thread and pumps messages
+static HRESULT SHOpenFolderAndSelectItemsSafe(PCIDLIST_ABSOLUTE pidlFolder, UINT cidl, PCUITEMID_CHILD_ARRAY apidl, DWORD dwFlags)
+{
+	return ExecuteOnSTAThread([=]() {
+		return SHOpenFolderAndSelectItems(pidlFolder, cidl, apidl, dwFlags);
+	});
+}
 
 static CString g_RenameText;
 static POINT g_RenamePos;
@@ -935,7 +981,7 @@ static bool ExecuteShutdownCommand(TMenuID menuCommand)
 		if (!ProceedWithShutdown(flags))
 			return true;
 
-		flags |= SHUTDOWN_FORCE_OTHERS;
+		flags |= SHUTDOWN_FORCE_OTHERS | SHUTDOWN_ARSO;
 
 		if (SetShutdownPrivileges())
 		{
@@ -1377,6 +1423,19 @@ static HRESULT CreatePinLink( PCIDLIST_ABSOLUTE sourcePidl, const wchar_t *name,
 		CloseHandle(h);
 	}
 	return S_OK;
+}
+
+static CString GetContextMenuItemVerb(IContextMenu* pContextMenu, UINT_PTR uId)
+{
+	wchar_t verbW[256] = {};
+	if (SUCCEEDED(pContextMenu->GetCommandString(uId, GCS_VERBW, nullptr, reinterpret_cast<char*>(verbW), sizeof(verbW))))
+		return CString(verbW);
+
+	char verbA[256] = {};
+	if (SUCCEEDED(pContextMenu->GetCommandString(uId, GCS_VERBA, nullptr, verbA, sizeof(verbA))))
+		return CString(verbA);
+
+	return {};
 }
 
 // This function "activates" an item. The item can be activated in multiple ways:
@@ -2871,7 +2930,7 @@ void CMenuContainer::ActivateItem( int index, TActivateType type, const POINT *p
 		}
 		else
 		{
-			SHOpenFolderAndSelectItems(pItemPidl1,0,NULL,0);
+			SHOpenFolderAndSelectItemsSafe(pItemPidl1,0,NULL,0);
 		}
 		res=0;
 	}
@@ -3113,7 +3172,15 @@ void CMenuContainer::ActivateItem( int index, TActivateType type, const POINT *p
 			}
 			else
 			{
-				HRESULT hr=pInvokeMenu->InvokeCommand((LPCMINVOKECOMMANDINFO)&info);
+				HRESULT hr{};
+				auto verb = GetContextMenuItemVerb(pInvokeMenu, (UINT_PTR)info.lpVerbW);
+				// "opencontaining" may block the UI thread on recent Windows 11 versions.
+				// Use the shell API on a worker STA for that operation, without passing
+				// the apartment-bound IContextMenu interface to another thread.
+				if (verb.CompareNoCase(L"opencontaining") == 0)
+					hr = SHOpenFolderAndSelectItemsSafe(pItemPidl1, 0, NULL, 0);
+				else
+					hr = pInvokeMenu->InvokeCommand((LPCMINVOKECOMMANDINFO)&info);
 				LOG_MENU(LOG_EXECUTE,L"Invoke command, ptr=%p, res=%d",this,hr);
 				executeSuccess=SUCCEEDED(hr);
 			}

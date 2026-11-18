@@ -19,7 +19,7 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
-    <PlatformToolset>$(DefaultPlatformToolset)</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
     <WholeProgramOptimization Condition="'$(Configuration)'!='Debug'">true</WholeProgramOptimization>
   </PropertyGroup>
@@ -64,6 +64,7 @@
     <None Include="msichecksum.bin" />
     <None Include="Temp\Setup32.msi_" />
     <None Include="Temp\Setup64.msi_" />
+    <None Include="Temp\SetupARM64.msi_" />
     <None Include="__MakeFinal.bat" />
   </ItemGroup>
   <ItemGroup>

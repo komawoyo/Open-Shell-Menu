@@ -12,8 +12,8 @@ set SRC_ROOT=%~fdp1
 
 rem get repo url
 for /f %%A in ('git remote get-url origin') do set REPO_URL=%%A
-rem remove .git from the end
-set REPO_URL=%REPO_URL:~0,-4%
+rem remove eventual .git from the end
+if /I "%REPO_URL:~-4%"==".git" set "REPO_URL=%REPO_URL:~0,-4%"
 
 rem get actual commit id
 for /f %%A in ('git rev-parse HEAD') do set COMMIT=%%A

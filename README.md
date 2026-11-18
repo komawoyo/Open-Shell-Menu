@@ -7,7 +7,7 @@ A collection of utilities bringing back classic features to Windows.
 
 *Originally* **[Classic Shell](http://www.classicshell.net)** *by [Ivo Beltchev](https://sourceforge.net/u/ibeltchev/profile/)*
 
-[![GitHub Release](https://img.shields.io/github/release/Open-Shell/Open-Shell-Menu.svg?style=flat-square)](https://github.com/Open-Shell/Open-Shell-Menu/releases/latest)&nbsp;&nbsp;[![GitHub Pre-Release](https://img.shields.io/github/release/Open-Shell/Open-Shell-Menu/all.svg?style=flat-square)](https://github.com/Open-Shell/Open-Shell-Menu/releases)&nbsp;&nbsp;[![Build status](https://img.shields.io/appveyor/build/passionate-coder/Open-Shell-Menu?logo=appveyor&style=flat-square)](https://ci.appveyor.com/project/passionate-coder/open-shell-menu/branch/master)&nbsp;&nbsp;[![GitQ](https://img.shields.io/badge/gitq-discussions-1577fa?style=flat-square)](https://gitq.com/passionate-coder/Classic-Start)&nbsp;&nbsp;[![Gitter chat](https://img.shields.io/gitter/room/badges/shields.svg?color=lightseagreen&logo=gitter&style=flat-square)](https://gitter.im/open-shell/Lobby)&nbsp;&nbsp;[![Discord](https://img.shields.io/discord/757701054782636082?color=mediumslateblue&label=Discord&logo=discord&logoColor=white&style=flat-square)](https://discord.gg/7H6arr5)
+[![GitHub Release](https://img.shields.io/github/release/Open-Shell/Open-Shell-Menu.svg?style=flat-square)](https://github.com/Open-Shell/Open-Shell-Menu/releases/latest)&nbsp;&nbsp;[![GitHub Pre-Release](https://img.shields.io/github/release/Open-Shell/Open-Shell-Menu/all.svg?style=flat-square)](https://github.com/Open-Shell/Open-Shell-Menu/releases)&nbsp;&nbsp;[![Build](https://github.com/Open-Shell/Open-Shell-Menu/actions/workflows/build.yml/badge.svg)](https://github.com/Open-Shell/Open-Shell-Menu/actions/workflows/build.yml)&nbsp;&nbsp;[![Build status](https://img.shields.io/appveyor/build/passionate-coder/Open-Shell-Menu?logo=appveyor&style=flat-square)](https://ci.appveyor.com/project/passionate-coder/open-shell-menu/branch/master)&nbsp;&nbsp;[![GitQ](https://img.shields.io/badge/gitq-discussions-1577fa?style=flat-square)](https://gitq.com/passionate-coder/Classic-Start)&nbsp;&nbsp;[![Gitter chat](https://img.shields.io/gitter/room/badges/shields.svg?color=lightseagreen&logo=gitter&style=flat-square)](https://gitter.im/open-shell/Lobby)&nbsp;&nbsp;[![Discord](https://img.shields.io/discord/757701054782636082?color=mediumslateblue&label=Discord&logo=discord&logoColor=white&style=flat-square)](https://discord.gg/7H6arr5)
 
 [Open-Shell Homepage](https://open-shell.github.io/Open-Shell-Menu)  
 
@@ -23,8 +23,14 @@ You can find the latest stable version here:
 
 [![GitHub All Releases](https://img.shields.io/github/downloads/Open-Shell/Open-Shell-Menu/total?style=for-the-badge&color=4bc2ee&logo=github)](https://github.com/Open-Shell/Open-Shell-Menu/releases/latest)
 
-### ⚠️ Windows for ARM compatibility ⚠️
-Open-Shell is not compatible with Windows for ARM. If you install it on a Windows for ARM installation (ex. using Parallels Desktop on an Apple Silicon Mac), you will no longer be able to log into your account the next time you reboot. Please refrain from installing Open-Shell on Windows for ARM.
+> [!IMPORTANT]
+> #### Windows for ARM compatibility
+> Open-Shell is compatible with Windows for ARM since version [4.4.196](https://github.com/Open-Shell/Open-Shell-Menu/releases/tag/v4.4.196).
+>
+> If you install older one on a Windows for ARM installation (ex. using Parallels Desktop on an Apple Silicon Mac), you will no longer be able to log into your account the next time you reboot. Please refrain from installing Open-Shell on Windows for ARM.
+
+### Code signing
+Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/)
 
 ### Temporary Translation/Language Solution
 1. Download [language DLL](https://coddec.github.io/Classic-Shell/www.classicshell.net/translations/index.html)  
